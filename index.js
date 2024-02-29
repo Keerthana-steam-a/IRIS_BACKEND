@@ -188,11 +188,8 @@ app.patch("/status", async (req, res) => {
 
     const updateData = await pool.query(
       `UPDATE chargers
-
-        SET test_cases = $1
-
-        WHERE cp_id=$2`,
-
+      SET test_cases = $1
+      WHERE cp_id=$2`,
       [JSON.stringify(test_cases), cp_id]
     );
 
