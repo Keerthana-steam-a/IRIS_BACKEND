@@ -114,12 +114,13 @@ app.post("/user", async (req, res) => {
 
     if (userData.rows[0].user_type === "agent") {
       const stationId = userData.rows[0].station_id;
-
+      console.log("stationId", stationId);
       const stationData = await pool.query(
         `SELECT * from "stations" WHERE id=$1`,
 
         [stationId]
       );
+      console.log("stationId", stationData.rows);
 
       const chargerId = userData.rows[0].charge_point_id;
 
@@ -128,6 +129,7 @@ app.post("/user", async (req, res) => {
 
         [chargerId]
       );
+      console.log("stationId", chargerData.rows);
 
       res.json({
         userDetails: userData.rows[0],
@@ -137,36 +139,67 @@ app.post("/user", async (req, res) => {
         chargerDetails: chargerData.rows[0],
       });
     } else if (userData.rows[0].user_type === "lead") {
-      const stationId = userData.rows[0].station_id;
+      const stationIds = userData.rows[0].station_id;
+      console.log("stationIds", stationIds);
 
-      const stationData = await pool.query(
-        `SELECT * from "stations" WHERE id=$1`,
+      // Convert stationIds to an array if it's not already
+      const stationIdsArray = Array.isArray(stationIds)
+        ? stationIds
+        : [stationIds];
 
-        [stationId]
-      );
+      const chargerDetails = [];
 
-      const chargerData = await pool.query(
-        `SELECT * from "chargers" WHERE station_id=$1`,
+      for (const stationId of stationIdsArray) {
+        const stationData = await pool.query(
+          `SELECT * from "stations" WHERE id=$1`,
+          [stationId]
+        );
 
-        [stationId]
-      );
+        const chargerData = await pool.query(
+          `SELECT * from "chargers" WHERE station_id=$1`,
+          [stationId]
+        );
+
+        const stationDetail = stationData.rows[0];
+        const chargersForStation = chargerData.rows;
+
+        chargerDetails.push({
+          stationDetails: stationDetail,
+          chargers: chargersForStation,
+        });
+      }
 
       res.json({
         userDetails: userData.rows[0],
-
-        stationDetails: stationData.rows[0],
-
-        chargerDetails: chargerData.rows,
+        chargerDetails: chargerDetails,
       });
     } else if (userData.rows[0].user_type === "assurance") {
       const chargerData = await pool.query(
         `SELECT * from "chargers" as ch left join stations on ch.station_id=stations.id`
       );
 
+      const chargerDetails = chargerData.rows.reduce((acc, charger) => {
+        if (!acc[charger.station_id]) {
+          acc[charger.station_id] = {
+            stationDetails: {
+              id: charger.station_id,
+              location_name: charger.location_name,
+              oem_name: charger.oem_name,
+            },
+            chargers: [],
+          };
+        }
+        acc[charger.station_id].chargers.push({
+          id: charger.id,
+          cp_id: charger.cp_id,
+          test_cases: charger.test_cases,
+        });
+        return acc;
+      }, {});
+
       res.json({
         userDetails: userData.rows[0],
-
-        chargerDetails: chargerData.rows,
+        chargerDetails: Object.values(chargerDetails),
       });
     }
   } catch (error) {
@@ -200,7 +233,63 @@ app.patch("/status", async (req, res) => {
     console.log("error", error);
   }
 });
+app.post("/stations", async (req, res) => {
+  const { stationName, oem } = req.body;
 
+  try {
+    // Insert station into the stations table
+    const stationQuery = await pool.query(
+      "INSERT INTO stations (location_name, oem_name) VALUES ($1, $2) RETURNING id",
+      [stationName, oem]
+    );
+    const stationId = stationQuery.rows[0].id;
+
+    res.status(201).json({ stationId, message: "Station added successfully" });
+  } catch (error) {
+    console.error("Error adding new station:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Endpoint for adding a new charger
+app.post("/chargers", async (req, res) => {
+  const { stationId, cpId, testCases } = req.body;
+
+  try {
+    // Insert charger into the chargers table
+    await pool.query(
+      "INSERT INTO chargers (station_id, cp_id, test_cases) VALUES ($1, $2, $3)",
+      [stationId, cpId, JSON.stringify(testCases)]
+    );
+
+    res.status(201).send("Charger added successfully");
+  } catch (error) {
+    console.error("Error adding new charger:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+// Endpoint for adding a new user
+app.post("/users", async (req, res) => {
+  const { username, userType, stationId, cpId } = req.body;
+  const charge_point_id = await pool.query(
+    `SELECT id from "chargers" where cp_id =$1`,
+    [cpId]
+  );
+  const cp_id = charge_point_id.rows[0].id;
+  try {
+    // Insert user into the users table
+    await pool.query(
+      'INSERT INTO "user" (username, user_type, station_id,charge_point_id) VALUES ($1, $2, $3,$4)',
+      [username, userType, stationId, cp_id]
+    );
+
+    res.status(201).send("User added successfully");
+  } catch (error) {
+    console.error("Error adding new user:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
 // set port, listen for requests
 
 const PORT = process.env.PORT || 8080;
