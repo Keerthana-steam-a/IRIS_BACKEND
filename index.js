@@ -45,7 +45,10 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 //basic route
-
+app.get("/userlist", async (req, res) => {
+  const user_list = await pool.query(`SELECT username from "user" where user_type='lead'`);
+  res.json({ user: user_list.rows });
+});
 app.get("/", async (req, res) => {
   const test_cases_query = await pool.query(`SELECT name from "test_case" `);
 
@@ -290,7 +293,49 @@ app.post("/users", async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 });
-// set port, listen for requests
+app.patch("/stationassign", async (req, res) => {
+  const { username, stationId } = req.body;
+
+  try {
+    const getUserResult = await pool.query(
+      'SELECT station_id FROM "user" WHERE username = $1',
+      [username]
+    );
+    if (getUserResult.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    let currentStationId = getUserResult.rows[0].station_id;
+    console.log("Current Station ID:", currentStationId);
+    if (!Array.isArray(currentStationId)) {
+      currentStationId = [currentStationId];
+    }
+    currentStationId = currentStationId.map(String);
+    if (!currentStationId.includes(stationId)) {
+      currentStationId.push(stationId);
+      console.log("currentStationId", currentStationId);
+      const updateResult = await pool.query(
+        'UPDATE "user" SET station_id = $1 WHERE username = $2',
+        [JSON.stringify(currentStationId), username]
+      );
+
+      res.json({ message: "User assigned to station successfully" });
+    } else {
+      res.json({ message: "Station already assigned to user" });
+    }
+  } catch (error) {
+    console.error("Error assigning user to station:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+
+
+
+
+
+
+
 
 const PORT = process.env.PORT || 8080;
 
